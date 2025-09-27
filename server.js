@@ -15,7 +15,6 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const REDIS_URL = process.env.REDIS_URL;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-import Redis from "ioredis";
 
 const redis = new Redis(process.env.REDIS_URL, {
   tls: {}   // tells ioredis to use TLS
