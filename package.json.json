@@ -1,0 +1,16 @@
+{
+  "name": "sql-skribbl-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.44.4",
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1",
+    "node-fetch": "^3.3.2",
+    "ws": "^8.18.0"
+  }
+}
