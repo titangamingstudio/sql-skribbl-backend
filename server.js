@@ -16,7 +16,7 @@ const REDIS_URL = process.env.REDIS_URL;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const redis = new Redis(REDIS_URL);
-const PORT = process.env.PORT || 3000;
+
 const wss = new WebSocketServer({ port: PORT });
 
 console.log(`WebSocket server listening on :${PORT}`);
