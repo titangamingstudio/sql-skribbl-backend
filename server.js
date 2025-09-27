@@ -3,26 +3,32 @@ import WebSocket, { WebSocketServer } from "ws";
 import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
 import Redis from "ioredis";
-import "dotenv/config";
 
-
+// -----------------------
+// ENV VARS
+// -----------------------
 const PORT = process.env.PORT || 3000;
-
-// Env vars
-const VALIDATOR_URL = process.env.VALIDATOR_URL; // e.g. https://validator.onrender.com/validate
+const VALIDATOR_URL = process.env.VALIDATOR_URL; // e.g. https://sql-validator.onrender.com/validate
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const REDIS_URL = process.env.REDIS_URL;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// -----------------------
+// CLIENTS
+// -----------------------
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-const redis = new Redis(process.env.REDIS_URL, {
-  tls: {}   // tells ioredis to use TLS
-});
+// Upstash Redis with TLS
+const redis = new Redis(REDIS_URL, { tls: {} });
 
+// Log Redis connection status
+redis.on("connect", () => console.log("[Redis] Connected"));
+redis.on("error", (err) => console.error("[Redis] Error:", err.message));
 
+// -----------------------
+// WEBSOCKET SERVER
+// -----------------------
 const wss = new WebSocketServer({ port: PORT });
-
 console.log(`WebSocket server listening on :${PORT}`);
 
 wss.on("connection", (ws) => {
@@ -31,51 +37,62 @@ wss.on("connection", (ws) => {
   ws.on("message", async (msg) => {
     try {
       const data = JSON.parse(msg);
+      console.log("[WS] Received:", data);
 
-      // Player submits SQL
       if (data.type === "submit_sql") {
-        const { user_id, round_id, sql, seed_sql } = data;
+        const { user_id = "debug-user", round_id = "debug-round", sql, seed_sql } = data;
 
-        // Validate via FastAPI
+        // -----------------------
+        // 1. Call validator
+        // -----------------------
+        console.log("[Validator] Sending SQL:", sql);
         const res = await fetch(VALIDATOR_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sql, seed_sql }),
         });
         const verdict = await res.json();
+        console.log("[Validator] Response:", verdict);
 
-        // Save submission to DB
-        await supabase.from("submissions").insert([
-          {
-            round_id,
-            user_id,
-            sql,
-            verdict: verdict.verdict,
-          },
+        // -----------------------
+        // 2. Save to Supabase
+        // -----------------------
+        const { error } = await supabase.from("submissions").insert([
+          { round_id, user_id, sql, verdict: verdict.verdict },
         ]);
+        if (error) {
+          console.error("[Supabase] Insert error:", error.message);
+        } else {
+          console.log("[Supabase] Insert success");
+        }
 
-        // First correct claim via Redis
+        // -----------------------
+        // 3. Redis first-correct claim
+        // -----------------------
         if (verdict.verdict === "ok") {
           const claimKey = `round:${round_id}:winner`;
           const claimed = await redis.setnx(claimKey, user_id);
           if (claimed) {
-            await redis.expire(claimKey, 60); // expire after 1 min
+            await redis.expire(claimKey, 60);
             verdict.first_correct = true;
+            console.log(`[Redis] Winner claimed for ${round_id} by ${user_id}`);
           } else {
             verdict.first_correct = false;
+            console.log(`[Redis] Already claimed for ${round_id}`);
           }
         }
 
-        // Broadcast result to all clients
+        // -----------------------
+        // 4. Broadcast verdict
+        // -----------------------
         broadcast({ type: "validation_result", ...verdict });
       }
 
-      // Handle ping
       if (data.type === "ping") {
         ws.send(JSON.stringify({ type: "pong" }));
       }
     } catch (e) {
-      console.error("Message error", e);
+      console.error("[WS] Message error:", e.message);
     }
   });
 });
